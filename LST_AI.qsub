@@ -1,0 +1,422 @@
+#! /bin/bash
+#SBATCH --output=/media/NG/slurm_logs/lstai_%j.out
+#SBATCH --error=/media/NG/slurm_logs/lstai_%j.err
+#SBATCH --job-name=lstai               # Job name
+#SBATCH --ntasks=1                     # Number of tasks (e.g., processes)
+#SBATCH --cpus-per-task=1              # Number of CPUs per task
+#SBATCH --mem=8G                       # Memory per node (e.g., 8 GB)
+
+
+#################################
+# LST-AI - NeuGRID2              #
+# Last Modification:  #
+#################################
+
+set -x
+
+#export FSLDIR=/usr/local/fsl
+#. /usr/local/fsl/etc/fslconf/fsl.sh
+
+export PATH="/home/adam/bin:$PATH"
+
+# Activate virtual environment
+source /home/adam/LST-AI_venv/bin/activate
+
+#git clone https://github.com/CompImg/LST-AI/
+#cd LST-AI
+#pip install -e .
+#cd ..
+
+#git clone https://github.com/MIC-DKFZ/HD-BET
+#cd HD-BET
+#git checkout ae160681324d524db3578e4135bf781f8206e146
+#pip install -e .
+#cd ..
+
+
+
+INPUTFILE_1=${1} # Input FLAIR image name
+INPUTFILE_2=${2} # Input T13D image name
+Age=${3}
+Sex=${4}
+USER_NAME_ID=${5}
+user_email=${6}
+#normative_type=${7}
+flair_type=${7}
+NG_PATH="/media/NG"
+COMMONS="${NG_PATH}/commons/LST_AI"
+MCR_PATH="/media/NG/MCR"
+BASE_DIR="/media/NG/Normative_NG/Normativa_LSTAI"
+
+# Create Unique ID for Job
+date_string=$(date '+%Y-%m-%d %H:%M:%S')
+day=$(echo "${date_string}" | cut -d' ' -f1 | sed 's/-//g')
+hour=$(echo "${date_string}" |cut -d' ' -f2 | sed 's/://g')
+rnd=$(echo $RANDOM)
+rnd=${rnd:0:2}
+cd ${NG_PATH}/sandbox
+if [ ! -e ${USER_NAME_ID} ]; then
+  mkdir ${USER_NAME_ID}
+fi
+cd ${USER_NAME_ID}
+job_folder="${day}${hour}${rnd}"
+mkdir $job_folder
+cd $job_folder
+
+cp $COMMONS/COMMON_FILE.zip .
+unzip COMMON_FILE.zip
+
+export PATH=/usr/local/fsl/bin:$PATH
+export FSLOUTPUTTYPE='NIFTI'
+export PATH=$PATH:/opt/Shared_Software/R2016b/bin
+export SPMDIR="${NG_PATH}/spm_mcr/spm_exec_v84"
+export MCRROOT="${NG_PATH}/MCR/v84"
+export PATH="$PATH:/usr/lib64"
+export SPM_LST=/opt/Shared_Software/R2016b/toolbox/spm12/toolbox/LST
+
+localpath=$(pwd)
+
+FileName_1=$(basename ${INPUTFILE_1})
+fileBaseName_1="${FileName_1%%.*}"
+mainDirName_1=$(echo "${FileName_1%%.*}" | sed 's/\./_/g')
+mainDrt_1="${mainDirName_1}"
+nmainDrt_1=0
+while [ -d ${mainDrt_1} ];do
+  nmainDrt_1=$(( ${nmainDrt_1}+1 ))
+  mainDrt_1="${mainDirName_1}-${nmainDrt_1}"
+done
+
+FileName_2=$(basename ${INPUTFILE_2})
+fileBaseName_2="${FileName_2%%.*}"
+mainDirName_2=$(echo "${FileName_2%%.*}" | sed 's/\./_/g')
+mainDrt_2="${mainDirName_2}"
+nmainDrt_2=0
+while [ -d ${mainDrt_2} ];do
+  nmainDrt_2=$(( ${nmainDrt_2}+1 ))
+  mainDrt_2="${mainDirName_2}-${nmainDrt_2}"
+done
+
+# Process the data, compress the output and move it to the Output directory#
+mkdir ${NG_PATH}/sandbox/upload_${USER_NAME_ID}
+mkdir ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}
+mkdir ${NG_PATH}/inputs/${USER_NAME_ID}
+mkdir ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}
+
+if [ "${INPUTFILE_1##*.}" == "zip" ]; then
+  ##anonymization DICOMS
+  mkdir ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+  unzip -j ${NG_PATH}/uploads/${INPUTFILE_1} -d ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+  chmod 777 -R ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+  rm ${NG_PATH}/uploads/${INPUTFILE_1}
+  find ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold -type f -follow -print > ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  while read sub; do
+    dcmdjpeg $sub $sub
+  done < ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  sed -i '/^$/d' ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  while read dcm_spect; do
+    tipo=`dcmdump ${dcm_spect} | grep '(0002,0010)'`
+    if [[ "$tipo" == *JPEG* ]]; then
+      dcmdjpeg $dcm_spect $dcm_spect
+    fi
+    dcmodify --no-backup -m "(0010,0010)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,0020)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,0030)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,0032)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,0050)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,1001)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,1040)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,1060)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,2154)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0038,0400)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0020)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0021)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0022)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0023)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0030)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0031)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0032)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0033)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0050)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0080)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0081)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0090)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,21b0)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,21c0)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0032,1032)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0032,1033)= " ${dcm_spect}
+  done < ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  rm ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  zip -jr ${NG_PATH}/uploads/${INPUTFILE_1} ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+  rm -rf ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+fi
+
+cp ${NG_PATH}/uploads/${INPUTFILE_1} ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}
+${NG_PATH}/scripts/eXtract.sh ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder} complex
+${NG_PATH}/scripts/toNiftiConv.sh ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder} ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/
+${NG_PATH}/scripts/eXtract.sh ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder} simple
+
+if [ "${INPUTFILE_1##*.}" == "zip" ]; then
+  mvfile1=$(find ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder} | grep o_${fileBaseName_1}.nii | head -1)
+else
+  mvfile1=$(find ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder} | grep o_${fileBaseName_1}_0.nii | head -1)
+fi
+mv ${mvfile1} ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/FLAIR_native.nii
+mkdir ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D
+
+if [ "${INPUTFILE_2##*.}" == "zip" ]; then
+  ##anonymization DICOMS
+  mkdir ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+  unzip -j ${NG_PATH}/uploads/${INPUTFILE_2} -d ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+  rm ${NG_PATH}/uploads/${INPUTFILE_2}
+  find ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold -type f -follow -print > ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  while read sub; do
+    dcmdjpeg $sub $sub
+  done < ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  sed -i '/^$/d' ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  while read dcm_spect; do
+    tipo=`dcmdump ${dcm_spect} | grep '(0002,0010)'`
+    if [[ "$tipo" == *JPEG* ]]; then
+      dcmdjpeg $dcm_spect $dcm_spect
+    fi
+    dcmodify --no-backup -m "(0010,0010)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,0020)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,0030)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,0032)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,0050)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,1001)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,1040)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,1060)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,2154)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0038,0400)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0020)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0021)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0022)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0023)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0030)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0031)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0032)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0033)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0050)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0080)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0081)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0008,0090)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,21b0)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0010,21c0)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0032,1032)= " ${dcm_spect}
+    dcmodify --no-backup -m "(0032,1033)= " ${dcm_spect}
+  done < ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  rm ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/list_dcm
+  zip -jr ${NG_PATH}/uploads/${INPUTFILE_2} ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+  rm -rf ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/DICOM_fold
+fi
+
+mkdir ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}/T13D
+cp ${NG_PATH}/uploads/${INPUTFILE_2} ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder}
+${NG_PATH}/scripts/eXtract.sh ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder} complex
+${NG_PATH}/scripts/toNiftiConv.sh ${NG_PATH}/sandbox/upload_${USER_NAME_ID}/${job_folder} ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D
+${NG_PATH}/scripts/eXtract.sh ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D simple
+
+if [ "${INPUTFILE_2##*.}" == "zip" ]; then
+  mvfile2=$(find ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder} | grep o_${fileBaseName_2}.nii | head -1)
+else
+  mvfile2=$(find ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder} | grep o_${fileBaseName_2}_0.nii | head -1)
+fi
+mv ${mvfile2} ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D_native.nii
+
+echo "************************************************"
+echo "CHECK THE EXISTENCE OF FLAIR AND T13D IN INPUT:"
+echo ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/
+ls -al ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/
+echo "************************************************"
+
+
+
+#################### LST-AI RUN ######################
+
+mkdir ${NG_PATH}/sandbox/${USER_NAME_ID}
+mkdir ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}
+
+mkdir ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/results
+mkdir ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/temp
+mkdir ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/SPM
+
+cp ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D_native.nii ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/SPM/
+
+gzip ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D_native.nii
+gzip ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/FLAIR_native.nii
+
+echo -e "\n${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D_native.nii.gz\n"
+echo -e "\n${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/FLAIR_native.nii.gz\n"
+
+lst --t1 ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D_native.nii.gz  --flair ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/FLAIR_native.nii.gz  --output ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/results  --temp ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/temp --device cpu;
+
+
+
+#################### SPM RUN ######################
+
+cd ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/SPM
+touch ICV.txt
+
+# Scrive segmentation.m
+echo "% List of open inputs
+	nrun = 1; % enter the number of runs here
+	jobfile = {'segmentation_job.m'};
+	jobs = repmat(jobfile, 1, nrun);
+	inputs = cell(0, nrun);
+	for crun = 1:nrun
+	end
+	spm('defaults', 'FMRI');
+	spm_jobman('run', jobs, inputs{:});
+	fid=fopen('ICV.txt','w')
+	fprintf(fid, '%0.3f', ICV)
+	fclose(fid)
+	quit()	
+		
+" > segmentation.m
+echo "
+	matlabbatch{1}.spm.spatial.preproc.channel.vols = {'T13D_native.nii,1'};
+	matlabbatch{1}.spm.spatial.preproc.channel.biasreg = 0.001;
+	matlabbatch{1}.spm.spatial.preproc.channel.biasfwhm = 60;
+	matlabbatch{1}.spm.spatial.preproc.channel.write = [0 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(1).tpm = {'/media/NG/MCR/v91/tpm/TPM.nii,1'};
+	matlabbatch{1}.spm.spatial.preproc.tissue(1).ngaus = 1;
+	matlabbatch{1}.spm.spatial.preproc.tissue(1).native = [1 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(1).warped = [0 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(2).tpm = {'/media/NG/MCR/v91/tpm/TPM.nii,2'};
+	matlabbatch{1}.spm.spatial.preproc.tissue(2).ngaus = 1;
+	matlabbatch{1}.spm.spatial.preproc.tissue(2).native = [1 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(2).warped = [0 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(3).tpm = {'/media/NG/MCR/v91/tpm/TPM.nii,3'};
+	matlabbatch{1}.spm.spatial.preproc.tissue(3).ngaus = 2;
+	matlabbatch{1}.spm.spatial.preproc.tissue(3).native = [1 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(3).warped = [0 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(4).tpm = {'/media/NG/MCR/v91/tpm/TPM.nii,4'};
+	matlabbatch{1}.spm.spatial.preproc.tissue(4).ngaus = 3;
+	matlabbatch{1}.spm.spatial.preproc.tissue(4).native = [1 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(4).warped = [0 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(5).tpm = {'/media/NG/MCR/v91/tpm/TPM.nii,5'};
+	matlabbatch{1}.spm.spatial.preproc.tissue(5).ngaus = 4;
+	matlabbatch{1}.spm.spatial.preproc.tissue(5).native = [1 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(5).warped = [0 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(6).tpm = {'/media/NG/MCR/v91/tpm/TPM.nii,6'};
+	matlabbatch{1}.spm.spatial.preproc.tissue(6).ngaus = 2;
+	matlabbatch{1}.spm.spatial.preproc.tissue(6).native = [0 0];
+	matlabbatch{1}.spm.spatial.preproc.tissue(6).warped = [0 0];
+	matlabbatch{1}.spm.spatial.preproc.warp.mrf = 1;
+	matlabbatch{1}.spm.spatial.preproc.warp.cleanup = 1;
+	matlabbatch{1}.spm.spatial.preproc.warp.reg = [0 0.001 0.5 0.05 0.2];
+	matlabbatch{1}.spm.spatial.preproc.warp.affreg = 'mni';
+	matlabbatch{1}.spm.spatial.preproc.warp.fwhm = 0;
+	matlabbatch{1}.spm.spatial.preproc.warp.samp = 3;
+	matlabbatch{1}.spm.spatial.preproc.warp.write = [0 0];
+	matlabbatch{2}.spm.util.tvol.matfiles = {'T13D_native_seg8.mat'};
+	matlabbatch{2}.spm.util.tvol.tmax = 3;
+	matlabbatch{2}.spm.util.tvol.mask = {'/media/NG/MCR/v91/tpm/mask_ICV.nii,1'};
+	matlabbatch{2}.spm.util.tvol.outf = '';
+	matlabbatch{3}.cfg_basicio.var_ops.cfg_assignin.name = 'ICV';
+	matlabbatch{3}.cfg_basicio.var_ops.cfg_assignin.output(1) = cfg_dep('Tissue Volumes: Sum', substruct('.','val', '{}',{2}, '.','val', '{}',{1}, '.','val', '{}',{1}), substruct('.','vol_sum'));
+" > segmentation_job.m
+
+
+
+# Esegui SPM
+${BASE_DIR}/SPM/spm12/run_spm12.sh ${MCR_PATH}/v91 script segmentation.m
+
+deactivate
+
+#################### CREATE CSV AND CORRECT VOLUME VALUES ######################
+
+echo "************************************************"
+echo "************************************************"
+echo "LAUNCHING PYTHON:"
+echo "************************************************"
+echo "************************************************"
+
+cd ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}
+
+#python3 create_csv.py "$NG_PATH" "$USER_NAME_ID" "$job_folder" "$fileBaseName_1" "$Age"
+
+output=$(python3 create_csv.py "$NG_PATH" "$USER_NAME_ID" "$job_folder" "$fileBaseName_1" "$Age")
+clean_output=$(echo "$output" | sed -n '/===OUTPUT_TO_BASH===/,$p' | tail -n +2)
+
+while IFS='=' read -r key value; do
+    declare "$key=$value"
+done <<< "$clean_output"
+
+
+echo "Total lesion corrected = $Total_Lesion_Volume_corrected"
+
+##################### Plotting results with R ##################################
+
+cd ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/
+chmod 777 -R ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/
+
+echo "************************************************"
+echo "************************************************"
+echo "Plotting results with R"
+echo "************************************************"
+echo "************************************************"
+
+if [[ "$flair_type" == "3D" ]]; then
+    script="TOT_3D.r"
+
+elif [[ "$flair_type" == "2D" ]]; then
+    script="TOT_2D.r"
+
+fi
+
+chmod +x "$script"
+export SEX_SUBJ="${Sex}"
+./"$script"
+
+chmod 777 -R ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/
+
+################################# REPORT GENERATION ##################################
+
+fileBaseName_1_edited=$(echo $fileBaseName_1 | tr _ -) #useful to not crash the tex report
+sed -i "s/@@SUBJ_ID@@/${fileBaseName_1_edited}/g" LST_AI_Report_Template.tex
+sed -i "s/@@SUBJ_AGE@@/${Age}/g" LST_AI_Report_Template.tex
+sed -i "s/@@SUBJ_SEX@@/${Sex}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Vol_inf@@/${Lesion_Volume_Infratentorial_corrected}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Vol_per@@/${Lesion_Volume_Periventricular_corrected}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Vol_sub@@/${Lesion_Volume_Subcortical_corrected}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Vol_jux@@/${Lesion_Volume_Juxtacortical_corrected}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Vol_tot@@/${Total_Lesion_Volume_corrected}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Num_inf@@/${Num_Lesions_Infratentorial}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Num_per@@/${Num_Lesions_Juxtacortical}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Num_sub@@/${Num_Lesions_Periventricular}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Num_jux@@/${Num_Lesions_Subcortical}/g" LST_AI_Report_Template.tex
+sed -i "s/@@Num_tot@@/${Total_Num_Lesions}/g" LST_AI_Report_Template.tex
+
+pdflatex LST_AI_Report_Template.tex # 1st run
+#pdflatex LST_AI_Report_Template.tex #2nd run
+mv LST_AI_Report_Template.pdf "REPORT_${fileBaseName_1}.pdf"
+
+## compress output
+mkdir ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2
+chmod 777 -R ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2
+cp ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/T13D_native.nii.gz ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2
+cp ${NG_PATH}/inputs/${USER_NAME_ID}/${job_folder}/FLAIR_native.nii.gz ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2
+cp ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/results/space-flair_desc-annotated_seg-lst.nii.gz ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2
+cp ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/results/space-flair_seg-lst.nii.gz ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2
+cp ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/results/lesioni_unica_riga_ICV.csv ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2
+cp -r ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/SPM/* ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2/
+rm ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2/segmentation.m
+rm ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2/segmentation_job.m
+cd ${NG_PATH}/sandbox/${USER_NAME_ID}/$job_folder
+chmod 777 -R ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/Output_ng2
+zip -r Output_ng2.zip Output_ng2
+chmod 777 -R Output_ng2.zip
+rm -rf Output_ng2
+cd ${NG_PATH}/sandbox/${USER_NAME_ID}/${job_folder}/
+
+#Sending report through Mail
+cp ${NG_PATH}/scripts/mail_scripts_templates/mail.sh ./mail.sh
+chmod +x ./mail.sh
+./mail.sh "LST_AI" "REPORT_${fileBaseName_1}.pdf" "${user_email}" "${USER_NAME_ID}/${job_folder}"
+
+echo "
+################################
+############# DONE #############
+################################
+"
